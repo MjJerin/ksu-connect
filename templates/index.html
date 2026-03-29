@@ -257,6 +257,24 @@
     .r-inp{flex:1;background:var(--ibg);border:1px solid var(--bdr);border-radius:var(--r);color:var(--txt);font-family:'Lora',serif;font-size:.82rem;padding:.38rem .65rem;outline:none;transition:border-color .12s}
     .r-inp:focus{border-color:rgba(234,176,32,.35)}
     .r-inp::placeholder{color:var(--txt3)}
+    .gif-btn{background:none;border:1px solid var(--bdr);border-radius:4px;color:var(--txt3);font-family:'JetBrains Mono',monospace;font-size:.58rem;padding:.2rem .38rem;cursor:pointer;transition:all .12s;flex-shrink:0}
+    .gif-btn:hover{color:var(--gold);border-color:rgba(234,176,32,.3)}
+    .gif-panel{display:none;margin-top:.4rem;background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);padding:.5rem;backdrop-filter:blur(12px)}
+    .gif-panel.open{display:block}
+    .gif-search{width:100%;background:var(--ibg);border:1px solid var(--bdr);border-radius:6px;color:var(--txt);font-family:'Inter',sans-serif;font-size:.78rem;padding:.35rem .6rem;outline:none;margin-bottom:.45rem}
+    .gif-search:focus{border-color:rgba(234,176,32,.35)}
+    .gif-search::placeholder{color:var(--txt3)}
+    .gif-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:180px;overflow-y:auto}
+    .gif-grid::-webkit-scrollbar{width:2px}
+    .gif-grid::-webkit-scrollbar-thumb{background:rgba(234,176,32,.2)}
+    .gif-item{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;cursor:pointer;transition:opacity .12s;border:2px solid transparent}
+    .gif-item:hover{opacity:.8;border-color:var(--gold)}
+    .gif-preview{margin-top:.4rem;display:none;align-items:center;gap:.4rem;background:var(--ibg);border-radius:6px;padding:.3rem .5rem}
+    .gif-preview.show{display:flex}
+    .gif-preview img{width:48px;height:48px;object-fit:cover;border-radius:4px}
+    .gif-preview-txt{font-family:'JetBrains Mono',monospace;font-size:.6rem;color:var(--txt2);flex:1}
+    .gif-clear{background:none;border:none;color:var(--txt3);cursor:pointer;font-size:.7rem;padding:.1rem}
+    .gif-clear:hover{color:#e8464a}
 
     /* ASIDE */
     .aside-col{padding:1.3rem .92rem;display:flex;flex-direction:column;gap:.82rem}
@@ -832,6 +850,11 @@ function render(list){
   f.querySelectorAll('.tlb').forEach(b=>b.addEventListener('click',()=>tldr(+b.dataset.id)));
   f.querySelectorAll('.aibtn').forEach(b=>b.addEventListener('click',()=>askAI('Help with: "'+b.dataset.q+'"')));
   f.querySelectorAll('.rsb').forEach(b=>b.addEventListener('click',()=>sendRep(+b.dataset.id)));
+  f.querySelectorAll('.gifbtn').forEach(b=>b.addEventListener('click',()=>togGif(+b.dataset.id)));
+  f.querySelectorAll('.gif-search').forEach(inp=>{
+    inp.addEventListener('input',()=>{clearTimeout(inp._t);inp._t=setTimeout(()=>searchGifs(+inp.dataset.id||+inp.id.replace('gs-',''),inp.value.trim()),400);});
+    inp.dataset.id=inp.id.replace('gs-','');
+  });
   f.querySelectorAll('.delbtn').forEach(b=>b.addEventListener('click',()=>deletePost(+b.dataset.id)));
   f.querySelectorAll('.r-inp').forEach(inp=>{
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendRep(+inp.dataset.id);}});
@@ -864,7 +887,17 @@ function card(p){
       <div class="rw" id="rw-${p.id}"></div>
       <div class="r-irow">
         <input class="r-inp" id="ri-${p.id}" data-id="${p.id}" placeholder="Reply… use @name to mention"/>
+        <button class="gif-btn gifbtn" data-id="${p.id}" title="Add GIF">GIF</button>
         <button class="btn btn-gd rsb" data-id="${p.id}" style="padding:.28rem .6rem;font-size:.73rem;font-weight:600">Send</button>
+      </div>
+      <div class="gif-panel" id="gp-${p.id}">
+        <input class="gif-search" id="gs-${p.id}" placeholder="Search GIFs… (e.g. happy, wow, ksu)"/>
+        <div class="gif-grid" id="gg-${p.id}"></div>
+        <div class="gif-preview" id="gpv-${p.id}">
+          <img id="gpv-img-${p.id}" src="" alt=""/>
+          <span class="gif-preview-txt">GIF selected</span>
+          <button class="gif-clear" onclick="clearGif(${p.id})">✕</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -906,13 +939,19 @@ async function loadReps(id){
       <div class="r-top"><div class="r-av">${r.username==='FlashAI'?'F':(r.anonymous?'?':r.username[0].toUpperCase())}</div>
       <span class="r-name"><strong>${r.anonymous?'Anonymous':esc(r.username)}</strong></span>
       <span class="r-time">${ago(r.created_at)}</span></div>
-      <div class="r-txt">${parseMentions(r.content)}</div></div>`).join('');}
+      <div class="r-txt">${r.content.startsWith('[GIF]')?`<img src="${r.content.replace('[GIF]','')}" style="max-width:200px;border-radius:6px;margin-top:4px;display:block" alt="gif"/>`:parseMentions(r.content)}</div></div>`).join('');}
   catch(e){}
 }
 async function sendRep(id){
-  const inp=$('ri-'+id),content=inp.value.trim();if(!content)return;
+  const inp=$('ri-'+id);
+  const gifUrl=gifSelected[id];
+  const content=gifUrl?`[GIF]${gifUrl}`:inp.value.trim();
+  if(!content)return;
   await fetch('/reply/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,anonymous:!me,username:me?me.username:'Anonymous'})});
-  inp.value='';loadReps(id);addFP(15,'replied to a post');
+  inp.value='';inp.placeholder='Reply… use @name to mention';
+  clearGif(id);
+  $('gp-'+id).classList.remove('open');
+  loadReps(id);addFP(15,'replied to a post');
 }
 
 // new post
@@ -1015,6 +1054,51 @@ document.addEventListener('keydown',e=>{
 })();
 
 setInterval(()=>{if(me)load();},30000);
+
+// ── GIF PICKER ──
+const GIPHY_KEY='27hsIA2XtVvcbKlwqwiYOqqZ3KIGix6P';
+let gifSelected={};
+
+function togGif(id){
+  const panel=$('gp-'+id);
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open')){
+    const inp=$('gs-'+id);
+    if(inp)inp.focus();
+    if(!$('gg-'+id).children.length)searchGifs(id,'happy');
+  }
+}
+
+async function searchGifs(id,q){
+  if(!q)return;
+  const grid=$('gg-'+id);
+  grid.innerHTML='<div style="font-family:JetBrains Mono,monospace;font-size:.6rem;color:var(--txt3);padding:.5rem;grid-column:1/-1">searching…</div>';
+  try{
+    const r=await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=9&rating=g`);
+    const d=await r.json();
+    if(!d.data.length){grid.innerHTML='<div style="font-family:JetBrains Mono,monospace;font-size:.6rem;color:var(--txt3);padding:.5rem;grid-column:1/-1">no results</div>';return;}
+    grid.innerHTML=d.data.map(g=>`<img class="gif-item" src="${g.images.fixed_height_small.url}" data-url="${g.images.downsized.url}" data-id="${id}" onclick="selectGif(${id},'${g.images.downsized.url}')" alt="gif"/>`).join('');
+  }catch(e){grid.innerHTML='<div style="font-family:JetBrains Mono,monospace;font-size:.6rem;color:#e8464a;padding:.5rem;grid-column:1/-1">error loading GIFs</div>';}
+}
+
+function selectGif(id,url){
+  gifSelected[id]=url;
+  const pv=$('gpv-'+id);
+  const pvimg=$('gpv-img-'+id);
+  pvimg.src=url;
+  pv.classList.add('show');
+  // Clear the text input since we're sending a gif
+  $('ri-'+id).value='';
+  $('ri-'+id).placeholder='GIF ready — hit Send!';
+  toast('GIF selected! Hit Send ⚡');
+}
+
+function clearGif(id){
+  delete gifSelected[id];
+  const pv=$('gpv-'+id);
+  pv.classList.remove('show');
+  $('ri-'+id).placeholder='Reply… use @name to mention';
+}
 </script>
 </body>
 </html>
