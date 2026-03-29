@@ -384,6 +384,7 @@
     @media(max-width:600px){.mast,.snav,.feed-col{padding-left:.82rem;padding-right:.82rem}.mast-top{display:none}.uchip{display:none}}
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
 </head>
 <body>
 <div class="bg"></div>
@@ -585,20 +586,20 @@
         <div class="powered">Powered by <span>FlashAI</span> · AWS Bedrock</div>
       </div>
 
-      <!-- Flash Corner -->
+      <!-- Flash Corner — Live Chat -->
       <div class="panel">
         <div class="ph">
           <div class="porb" style="background:transparent;border:1px solid var(--gold);color:var(--gold);font-size:.65rem">⚡</div>
           <div class="ptitle">Flash Corner</div>
-          <span class="pbadge" style="color:#27c97a;border-color:rgba(39,201,122,.3);background:rgba(39,201,122,.08)">OPEN</span>
+          <span class="pbadge" id="fc-badge" style="color:#27c97a;border-color:rgba(39,201,122,.3);background:rgba(39,201,122,.08)">LIVE</span>
         </div>
         <div class="fc-wrap">
-          <div class="fc-tag">community chat · anyone can join</div>
+          <div class="fc-tag" id="fc-status">connecting…</div>
           <div class="fc-msgs" id="fc-msgs">
             <div class="fc-empty">No one here yet — say hi! 👋</div>
           </div>
           <div class="fc-irow">
-            <input class="fc-inp" id="fc-inp" placeholder="Say hi to fellow Flashes…"/>
+            <input class="fc-inp" id="fc-inp" placeholder="Say hi to fellow Flashes…" maxlength="300"/>
             <button class="fc-send" id="fc-send">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
@@ -995,26 +996,63 @@ async function askAI(q){
 $('ai-go').addEventListener('click',()=>askAI($('ai-in').value.trim()));
 $('ai-in').addEventListener('keydown',e=>{if(e.key==='Enter')askAI($('ai-in').value.trim());});
 
-// Flash Corner
-function renderFC(){
-  const box=$('fc-msgs');
-  if(!fcMsgs.length){box.innerHTML='<div class="fc-empty">No one here yet — say hi! 👋</div>';return;}
-  box.innerHTML=fcMsgs.map(m=>`
+// ── FLASH CORNER — LIVE CHAT via Socket.IO ──
+const socket = io();
+let fcMessages = [];
+
+socket.on('connect', () => {
+  $('fc-status').textContent = 'live chat · anyone can join';
+  $('fc-badge').textContent = 'LIVE';
+});
+
+socket.on('chat_history', (msgs) => {
+  fcMessages = msgs.map(m => ({
+    from: m.username,
+    txt: m.message,
+    time: m.time,
+    mine: me && m.username === me.username
+  }));
+  renderFC();
+});
+
+socket.on('disconnect', () => {
+  $('fc-status').textContent = 'reconnecting…';
+  $('fc-badge').textContent = 'OFF';
+});
+
+socket.on('new_message', (data) => {
+  const mine = me && data.username === me.username;
+  fcMessages.push({from: data.username, txt: data.message, time: data.time, mine});
+  renderFC();
+});
+
+function renderFC() {
+  const box = $('fc-msgs');
+  if(!fcMessages.length) {
+    box.innerHTML = '<div class="fc-empty">No one here yet — say hi! 👋</div>';
+    return;
+  }
+  box.innerHTML = fcMessages.map(m => `
     <div class="fc-msg ${m.mine?'mine':''}">
       <div class="fc-av">${m.from[0].toUpperCase()}</div>
-      <div><div class="fc-who">${m.mine?'you':m.from}</div>
-      <div class="fc-bub">${parseMentions(m.txt)}</div></div>
+      <div>
+        <div class="fc-who">${m.mine?'you':esc(m.from)} <span style="font-size:.48rem;opacity:.5">${m.time||''}</span></div>
+        <div class="fc-bub">${parseMentions(m.txt)}</div>
+      </div>
     </div>`).join('');
-  box.scrollTop=box.scrollHeight;
+  box.scrollTop = box.scrollHeight;
 }
-function fcSend(){
-  const inp=$('fc-inp'),txt=inp.value.trim();if(!txt)return;
-  const name=me?me.username:'Anonymous';
-  fcMsgs.push({from:name,txt,mine:true});
-  inp.value='';renderFC();
+
+function fcSend() {
+  const inp = $('fc-inp'), txt = inp.value.trim();
+  if(!txt) return;
+  const name = me ? me.username : 'Anonymous';
+  socket.emit('send_message', {username: name, message: txt});
+  inp.value = '';
 }
-$('fc-send').addEventListener('click',fcSend);
-$('fc-inp').addEventListener('keydown',e=>{if(e.key==='Enter')fcSend();});
+
+$('fc-send').addEventListener('click', fcSend);
+$('fc-inp').addEventListener('keydown', e => { if(e.key==='Enter') fcSend(); });
 renderFC();
 
 // section nav

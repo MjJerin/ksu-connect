@@ -5,6 +5,7 @@
 # ============================================
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask_socketio import SocketIO, emit
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
@@ -33,6 +34,7 @@ load_env()
 app = Flask(__name__)
 app.secret_key = 'ksu-united-secret-2024'
 DATABASE = 'ksunited.db'
+socketio = SocketIO(app, cors_allowed_origins='*')
 
 # ---- LOGIN MANAGER ----
 login_manager = LoginManager()
@@ -238,6 +240,12 @@ def init_db():
         content    TEXT NOT NULL,
         anonymous  BOOLEAN NOT NULL,
         username   TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS chat_messages (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        username   TEXT NOT NULL,
+        message    TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
     conn.commit()
@@ -641,8 +649,42 @@ def leaderboard():
     return jsonify(scores[:10])
 
 # ============================================
+# SOCKET.IO — LIVE CHAT
+# ============================================
+
+@socketio.on('connect')
+def handle_connect():
+    # Send last 50 messages to the newly connected user
+    conn = get_db()
+    msgs = conn.execute(
+        'SELECT username, message, created_at FROM chat_messages ORDER BY created_at DESC LIMIT 50'
+    ).fetchall()
+    conn.close()
+    history = [{'username': m['username'], 'message': m['message'],
+                'time': m['created_at'][11:16]} for m in reversed(msgs)]
+    emit('chat_history', history)
+
+@socketio.on('send_message')
+def handle_message(data):
+    username = data.get('username', 'Anonymous')
+    message  = data.get('message', '').strip()
+    if not message or len(message) > 300:
+        return
+    # Save to database
+    conn = get_db()
+    conn.execute('INSERT INTO chat_messages (username, message) VALUES (?, ?)', (username, message))
+    conn.commit()
+    conn.close()
+    import datetime
+    emit('new_message', {
+        'username': username,
+        'message':  message,
+        'time':     datetime.datetime.now().strftime('%H:%M')
+    }, broadcast=True)
+
+# ============================================
 # START
 # ============================================
 if __name__ == '__main__':
     init_db()
-    app.run(debug=False)
+    socketio.run(app, debug=False)
